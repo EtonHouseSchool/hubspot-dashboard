@@ -1,11 +1,16 @@
 import { fetchAllDeals, fetchDealPipelines, buildStageLookup } from "./hubspotClient.js";
-import { aggregateDeals } from "./aggregate.js";
+import { aggregateDeals, resolveDeals } from "./aggregate.js";
 
+let cachedDeals = [];
 let cachedSummary = null;
 let lastError = null;
 
 export function getCachedSummary() {
   return cachedSummary;
+}
+
+export function getCachedDeals() {
+  return cachedDeals;
 }
 
 export function getLastError() {
@@ -22,7 +27,8 @@ export async function refreshCache() {
     const [deals, pipelines] = await Promise.all([fetchAllDeals(), fetchDealPipelines()]);
     const stageLookup = buildStageLookup(pipelines);
 
-    cachedSummary = aggregateDeals(deals, stageLookup, pipelineIds);
+    cachedDeals = resolveDeals(deals, stageLookup, pipelineIds);
+    cachedSummary = aggregateDeals(cachedDeals);
     lastError = null;
     console.log(`[cache] refreshed at ${cachedSummary.generatedAt} (${deals.length} deals)`);
   } catch (err) {
