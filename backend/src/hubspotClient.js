@@ -51,10 +51,12 @@ export async function fetchDealPipelines() {
 }
 
 /**
- * Builds a lookup of stageId -> { label, pipelineId, pipelineLabel, sortOrder }.
+ * Builds a lookup of stageId -> { label, pipelineId, pipelineLabel, pipelineIndex, sortOrder }.
  * sortOrder combines the pipeline's position with the stage's displayOrder so
  * charts can show stages in actual funnel order (New -> Tour -> Enrolled)
  * instead of sorting by count, matching how HubSpot's own reports order them.
+ * Two pipelines can define stages with the same label (e.g. both call one
+ * "New"), so pipelineId always identifies which pipeline a stage belongs to.
  */
 export function buildStageLookup(pipelines) {
   const lookup = {};
@@ -64,6 +66,7 @@ export function buildStageLookup(pipelines) {
         label: stage.label,
         pipelineId: pipeline.id,
         pipelineLabel: pipeline.label,
+        pipelineIndex,
         sortOrder: pipelineIndex * 1000 + (stage.displayOrder ?? 0),
       };
     }

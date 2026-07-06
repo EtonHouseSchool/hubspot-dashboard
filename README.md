@@ -103,9 +103,10 @@ hubspot-dashboard/
   If you'd rather count deals that *moved into* a stage recently regardless
   of creation date, swap `createdate` for `hs_lastmodifieddate` in
   `backend/src/aggregate.js`.
-- To restrict to a specific pipeline (e.g. only "Nature"), set
-  `HUBSPOT_PIPELINE_IDS` in `backend/.env` to that pipeline's ID (find it via
-  `GET /crm/v3/pipelines/deals`).
+- The dashboard renders one full section per HubSpot pipeline automatically
+  (e.g. one per campus/program) — no configuration needed. Two pipelines can
+  use the same stage label (both call a stage "New"), so stages are always
+  scoped by pipeline ID under the hood, never merged across pipelines.
 - The cache refreshes on a timer (`REFRESH_INTERVAL_MINUTES`, default 10) and
   instantly on webhook events, so there's no need to poll HubSpot on every
   page load.

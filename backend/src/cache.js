@@ -19,15 +19,10 @@ export function getLastError() {
 
 export async function refreshCache() {
   try {
-    const pipelineIds = (process.env.HUBSPOT_PIPELINE_IDS || "")
-      .split(",")
-      .map((id) => id.trim())
-      .filter(Boolean);
-
     const [deals, pipelines] = await Promise.all([fetchAllDeals(), fetchDealPipelines()]);
     const stageLookup = buildStageLookup(pipelines);
 
-    cachedDeals = resolveDeals(deals, stageLookup, pipelineIds);
+    cachedDeals = resolveDeals(deals, stageLookup);
     cachedSummary = aggregateDeals(cachedDeals);
     lastError = null;
     console.log(`[cache] refreshed at ${cachedSummary.generatedAt} (${deals.length} deals)`);

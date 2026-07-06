@@ -21,7 +21,9 @@ export default function DealPanel({ selection, deals, loading, error, onClose })
             <div className="deal-panel__header">
               <div>
                 <h2>{selection.stage}</h2>
-                <p>{PERIOD_LABELS[selection.period]}</p>
+                <p>
+                  {PERIOD_LABELS[selection.period]} · {selection.pipelineLabel}
+                </p>
               </div>
               <button onClick={onClose} aria-label="Close">✕</button>
             </div>

@@ -9,8 +9,8 @@ export async function fetchPipelineSummary() {
   return res.json();
 }
 
-export async function fetchDealsForStage(stage, period) {
-  const params = new URLSearchParams({ stage, period });
+export async function fetchDealsForStage(stage, period, pipeline) {
+  const params = new URLSearchParams({ stage, period, pipeline });
   const res = await fetch(`${API_URL}/api/deals?${params}`);
   if (!res.ok) {
     const body = await res.json().catch(() => ({}));

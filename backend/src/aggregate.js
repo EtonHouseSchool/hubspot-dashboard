@@ -22,15 +22,15 @@ const PERIOD_KEYS = ["weekly", "monthly", "quarterly"];
 /**
  * Turns raw HubSpot deal objects into the flat shape the rest of the app
  * works with, resolving stage IDs to human-readable labels (and their
- * funnel position) and dropping deals outside the configured pipeline(s).
+ * funnel position). Two pipelines can use the same stage label, so every
+ * deal carries its pipelineId/pipelineIndex to keep them from being mixed
+ * together downstream.
  */
-export function resolveDeals(deals, stageLookup, pipelineIds = []) {
+export function resolveDeals(deals, stageLookup) {
   const resolved = [];
 
   for (const deal of deals) {
     const props = deal.properties;
-    if (pipelineIds.length && !pipelineIds.includes(props.pipeline)) continue;
-
     const stageInfo = stageLookup[props.dealstage];
 
     resolved.push({
@@ -38,7 +38,9 @@ export function resolveDeals(deals, stageLookup, pipelineIds = []) {
       dealname: props.dealname || "(no name)",
       stage: stageInfo ? stageInfo.label : props.dealstage || "Unknown",
       stageOrder: stageInfo ? stageInfo.sortOrder : Number.MAX_SAFE_INTEGER,
-      pipeline: stageInfo ? stageInfo.pipelineLabel : props.pipeline || null,
+      pipelineId: stageInfo ? stageInfo.pipelineId : props.pipeline || "unknown",
+      pipelineLabel: stageInfo ? stageInfo.pipelineLabel : props.pipeline || "Unknown pipeline",
+      pipelineIndex: stageInfo ? stageInfo.pipelineIndex : Number.MAX_SAFE_INTEGER,
       createdate: props.createdate || null,
       closedate: props.closedate || null,
       lastmodifieddate: props.hs_lastmodifieddate || null,
@@ -74,45 +76,79 @@ function toSortedArray(counts, orders) {
     .map(({ stage, count }) => ({ stage, count }));
 }
 
-/**
- * Groups resolved deals into weekly/monthly/quarterly buckets by stage.
- * For each period, also computes the same stage breakdown for the
- * immediately preceding window of equal length (e.g. "this week so far"
- * vs. "the same number of days last week"), so the frontend can show fair
- * like-for-like trend deltas instead of comparing a partial period to a
- * full one.
- */
-export function aggregateDeals(resolvedDeals) {
+function summarizePeriods(deals) {
   const { startOfWeek, startOfMonth, startOfQuarter } = getPeriodStarts();
   const now = new Date();
   const periodStarts = { weekly: startOfWeek, monthly: startOfMonth, quarterly: startOfQuarter };
 
-  const result = { generatedAt: now.toISOString(), previous: {} };
+  const summary = {};
+  const previous = {};
 
   for (const key of PERIOD_KEYS) {
     const start = periodStarts[key];
-    const { counts, orders } = bucketCounts(resolvedDeals, start, now);
-    result[key] = toSortedArray(counts, orders);
+    const { counts, orders } = bucketCounts(deals, start, now);
+    summary[key] = toSortedArray(counts, orders);
 
     const durationMs = now.getTime() - start.getTime();
     const previousStart = new Date(start.getTime() - durationMs);
-    const { counts: prevCounts, orders: prevOrders } = bucketCounts(resolvedDeals, previousStart, start);
-    result.previous[key] = toSortedArray(prevCounts, prevOrders);
+    const { counts: prevCounts, orders: prevOrders } = bucketCounts(deals, previousStart, start);
+    previous[key] = toSortedArray(prevCounts, prevOrders);
   }
 
-  return result;
+  summary.previous = previous;
+  return summary;
+}
+
+/**
+ * Groups resolved deals by pipeline (e.g. two different campuses can each
+ * have their own pipeline in the same HubSpot account) and, within each
+ * pipeline, into weekly/monthly/quarterly stage buckets. Each period also
+ * gets the same breakdown for the immediately preceding window of equal
+ * length, so the frontend can show fair like-for-like trend deltas instead
+ * of comparing a partial period to a full one.
+ */
+export function aggregateDeals(resolvedDeals) {
+  const groups = new Map(); // pipelineId -> { id, label, index, deals: [] }
+
+  for (const deal of resolvedDeals) {
+    if (!groups.has(deal.pipelineId)) {
+      groups.set(deal.pipelineId, {
+        id: deal.pipelineId,
+        label: deal.pipelineLabel,
+        index: deal.pipelineIndex,
+        deals: [],
+      });
+    }
+    groups.get(deal.pipelineId).deals.push(deal);
+  }
+
+  const pipelines = [...groups.values()]
+    .sort((a, b) => a.index - b.index)
+    .map((group) => ({
+      id: group.id,
+      label: group.label,
+      ...summarizePeriods(group.deals),
+    }));
+
+  return { generatedAt: new Date().toISOString(), pipelines };
 }
 
 /**
  * Returns the individual deals behind one bar of a chart: a given stage
- * within a given period, newest first.
+ * within a given period for a specific pipeline, newest first.
  */
-export function filterDeals(resolvedDeals, { stage, period }) {
+export function filterDeals(resolvedDeals, { stage, period, pipelineId }) {
   const { startOfWeek, startOfMonth, startOfQuarter } = getPeriodStarts();
   const periodStart = { weekly: startOfWeek, monthly: startOfMonth, quarterly: startOfQuarter }[period];
   if (!periodStart) return [];
 
   return resolvedDeals
-    .filter((deal) => deal.stage === stage && deal.createdate && new Date(deal.createdate) >= periodStart)
+    .filter(
+      (deal) =>
+        deal.stage === stage &&
+        deal.pipelineId === pipelineId &&
+        deal.createdate &&
+        new Date(deal.createdate) >= periodStart
+    )
     .sort((a, b) => new Date(b.createdate) - new Date(a.createdate));
 }
