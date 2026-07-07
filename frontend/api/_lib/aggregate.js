@@ -106,9 +106,17 @@ function summarizePeriods(deals) {
  * gets the same breakdown for the immediately preceding window of equal
  * length, so the frontend can show fair like-for-like trend deltas instead
  * of comparing a partial period to a full one.
+ *
+ * `knownPipelines` (from HubSpot's pipeline list, not from the deals
+ * themselves) ensures a pipeline with zero matching deals in the fetched
+ * window still renders as an empty section instead of silently vanishing.
  */
-export function aggregateDeals(resolvedDeals) {
+export function aggregateDeals(resolvedDeals, knownPipelines = []) {
   const groups = new Map(); // pipelineId -> { id, label, index, deals: [] }
+
+  for (const { id, label, index } of knownPipelines) {
+    groups.set(id, { id, label, index, deals: [] });
+  }
 
   for (const deal of resolvedDeals) {
     if (!groups.has(deal.pipelineId)) {

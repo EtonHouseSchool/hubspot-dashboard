@@ -3,30 +3,40 @@ const HUBSPOT_BASE = "https://api.hubapi.com";
 function authHeaders() {
   const token = process.env.HUBSPOT_TOKEN;
   if (!token) {
-    throw new Error("HUBSPOT_TOKEN is not set. Copy .env.example to .env and add your private app token.");
+    throw new Error("HUBSPOT_TOKEN is not set. Add it in Vercel's Project Settings → Environment Variables.");
   }
-  return { Authorization: `Bearer ${token}` };
+  return { Authorization: `Bearer ${token}`, "Content-Type": "application/json" };
 }
 
+const DEAL_PROPERTIES = ["dealname", "dealstage", "pipeline", "createdate", "closedate", "hs_lastmodifieddate"];
+
 /**
- * Fetches every deal from HubSpot, following pagination.
- * Only requests the properties we actually need to keep payloads small.
+ * Fetches deals created on or after `sinceDate`, following pagination.
+ * There's no persistent server here to keep a full local copy of every deal,
+ * so every request asks HubSpot only for what it actually needs (the
+ * current + comparison period) instead of the whole account's history —
+ * that's the difference between a ~1s response and a 20+s one.
  */
-export async function fetchAllDeals() {
-  const properties = ["dealname", "dealstage", "pipeline", "createdate", "closedate", "hs_lastmodifieddate"];
+export async function fetchRecentDeals(sinceDate) {
   const deals = [];
   let after = undefined;
 
   do {
-    const url = new URL(`${HUBSPOT_BASE}/crm/v3/objects/deals`);
-    url.searchParams.set("properties", properties.join(","));
-    url.searchParams.set("limit", "100");
-    if (after) url.searchParams.set("after", after);
-
-    const res = await fetch(url, { headers: authHeaders() });
+    const res = await fetch(`${HUBSPOT_BASE}/crm/v3/objects/deals/search`, {
+      method: "POST",
+      headers: authHeaders(),
+      body: JSON.stringify({
+        filterGroups: [
+          { filters: [{ propertyName: "createdate", operator: "GTE", value: String(sinceDate.getTime()) }] },
+        ],
+        properties: DEAL_PROPERTIES,
+        limit: 100,
+        after,
+      }),
+    });
     if (!res.ok) {
       const body = await res.text();
-      throw new Error(`HubSpot deals request failed (${res.status}): ${body}`);
+      throw new Error(`HubSpot deals search failed (${res.status}): ${body}`);
     }
     const data = await res.json();
     deals.push(...data.results);

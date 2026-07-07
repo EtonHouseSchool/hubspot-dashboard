@@ -1,55 +1,53 @@
-# Nature pipeline dashboard
+# Admissions pipeline dashboard
 
 Executive dashboard that syncs deal-stage data from HubSpot and displays it
-as weekly / monthly / quarterly charts and KPIs. Two parts:
+as weekly / monthly / quarterly charts and KPIs, one section per pipeline
+(e.g. one per campus/program). Single Vite + React app:
 
-- `backend/` — Node/Express service. Holds the HubSpot token, fetches and
-  aggregates deals, exposes one endpoint. **Nothing else talks to HubSpot.**
-- `frontend/` — React (Vite) app. Calls the backend only, renders the charts.
+- `frontend/src/` — the dashboard UI.
+- `frontend/api/` — Vercel serverless functions. Hold the HubSpot token,
+  fetch and aggregate deals. **Nothing else talks to HubSpot.**
+
+There's no separate backend server or database — the serverless functions
+fetch directly from HubSpot on each request (only the deals actually needed
+for the current view, via a date-filtered search, to keep it fast) and rely
+on Vercel's edge cache instead of an in-memory one, since serverless
+functions don't keep a warm process running between requests.
 
 ## 1. HubSpot setup (one-time, in your HubSpot account)
 
-1. Settings → Integrations → **Private Apps** → Create a private app.
-2. Scopes: `crm.objects.deals.read`, `crm.schemas.deals.read`, `crm.objects.pipelines.read`.
-3. Copy the generated token (`pat-na1-...`) — you'll only see it once.
-4. Optional, for real-time updates: in the same private app, go to
-   **Webhooks** → subscribe to `deal.propertyChange` on `dealstage`, and note
-   the signing secret.
+Create a Private App or Service Key under Settings → Integrations, scoped to:
+`crm.objects.deals.read`, `crm.schemas.deals.read`, `crm.objects.pipelines.read`.
+Copy the generated token — you'll only see it once.
 
-## 2. Run the backend
+## 2. Run it locally
+
+Local dev uses the [Vercel CLI](https://vercel.com/docs/cli) so the `/api`
+functions run alongside the Vite app exactly like production:
 
 ```bash
-cd backend
+npm install -g vercel   # one-time
+cd frontend
 cp .env.example .env
 # edit .env and paste your HUBSPOT_TOKEN
 npm install
-npm run dev
+vercel dev
 ```
 
-Visit `http://localhost:4000/api/pipeline-summary` — you should see JSON
-grouped by week/month/quarter and stage.
+Visit the local URL it prints (typically `http://localhost:3000`).
 
-## 3. Run the frontend
+## 3. Deploying
 
-```bash
-cd frontend
-cp .env.example .env   # defaults to http://localhost:4000, fine for local dev
-npm install
-npm run dev
-```
+1. Push this repo to GitHub (see below if you haven't already).
+2. On [vercel.com](https://vercel.com), **Add New Project** → import the repo.
+3. Set **Root Directory** to `frontend`. Vercel auto-detects the Vite preset.
+4. Add environment variable `HUBSPOT_TOKEN` (Project Settings → Environment
+   Variables) with your real token — never commit it to `.env`.
+5. Deploy. Every push to `main` auto-redeploys.
 
-Visit `http://localhost:5173`.
+Vercel's free Hobby tier covers this comfortably with no recurring billing.
 
-## 4. Deploying
-
-- Backend: any Node host works (Railway, Render, Fly.io, an EC2 box). Set the
-  same env vars as `.env` in that host's dashboard — never commit `.env`.
-- Frontend: Vercel or Netlify. Set `VITE_API_URL` to your deployed backend's
-  URL, then `npm run build` (or let the platform build it for you).
-- Point the webhook URL (step 1.4) at `https://your-backend-domain/webhooks/hubspot`
-  once the backend is deployed.
-
-## 5. Push this to GitHub
+## 4. Push this to GitHub
 
 From the project root (this folder):
 
@@ -76,22 +74,21 @@ that token into a chat with anyone, including here.
 
 ```
 hubspot-dashboard/
-├── backend/
-│   ├── src/
-│   │   ├── server.js          # Express app, cron schedule
-│   │   ├── hubspotClient.js   # HubSpot API calls
-│   │   ├── aggregate.js       # groups deals by stage + time window
-│   │   ├── cache.js           # in-memory cache + refresh logic
-│   │   ├── routes/pipeline.js # GET/POST /api/pipeline-summary
-│   │   └── webhooks/hubspot.js
-│   └── .env.example
 └── frontend/
+    ├── api/
+    │   ├── _lib/
+    │   │   ├── hubspotClient.js   # HubSpot API calls
+    │   │   └── aggregate.js       # groups deals by pipeline + stage + time window
+    │   ├── pipeline-summary.js    # GET /api/pipeline-summary
+    │   └── deals.js               # GET /api/deals — deals behind one chart bar
     ├── src/
     │   ├── App.jsx
     │   ├── api.js
     │   ├── components/
     │   │   ├── MetricCard.jsx
-    │   │   └── StageChart.jsx
+    │   │   ├── PipelineSection.jsx
+    │   │   ├── StageChart.jsx
+    │   │   └── DealPanel.jsx
     │   └── styles.css
     └── .env.example
 ```
@@ -102,11 +99,15 @@ hubspot-dashboard/
   quarter, mirroring HubSpot's own "this week/month/quarter so far" reports.
   If you'd rather count deals that *moved into* a stage recently regardless
   of creation date, swap `createdate` for `hs_lastmodifieddate` in
-  `backend/src/aggregate.js`.
+  `frontend/api/_lib/aggregate.js`.
 - The dashboard renders one full section per HubSpot pipeline automatically
   (e.g. one per campus/program) — no configuration needed. Two pipelines can
   use the same stage label (both call a stage "New"), so stages are always
   scoped by pipeline ID under the hood, never merged across pipelines.
-- The cache refreshes on a timer (`REFRESH_INTERVAL_MINUTES`, default 10) and
-  instantly on webhook events, so there's no need to poll HubSpot on every
-  page load.
+- `/api/pipeline-summary` is cached at Vercel's edge for 5 minutes (serving
+  stale for up to 2 more while refreshing in the background). The "Refresh
+  now" button bypasses this with a cache-busting param to force a live fetch.
+- Both endpoints only fetch deals created since the oldest boundary they
+  actually need (not the account's full history) — this is what keeps a
+  serverless request fast instead of paginating through every deal ever
+  created on every call.
