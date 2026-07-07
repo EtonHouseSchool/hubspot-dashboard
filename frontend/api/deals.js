@@ -3,6 +3,10 @@ import { resolveDeals, filterDeals, getPeriodStarts } from "./_lib/aggregate.js"
 
 const VALID_PERIODS = ["weekly", "monthly", "quarterly"];
 
+// See pipeline-summary.js — the quarterly ("term") window can span several
+// months, so this gets the same safety margin.
+export const config = { maxDuration: 30 };
+
 // GET /api/deals?stage=Tour+Scheduled&period=weekly&pipeline=default — the deals behind one bar of a chart.
 // pipeline is required because two pipelines can use the same stage label (e.g. both call a stage "New").
 export default async function handler(req, res) {

@@ -1,6 +1,7 @@
 /**
- * Returns the start of the current week (Monday), month, and quarter,
- * matching HubSpot's "this week/month/quarter so far" report semantics.
+ * Returns the start of the current week (Monday), month, and "quarter".
+ * "Quarter" here means a fixed 4-month block (Jan-Apr, May-Aug, Sep-Dec) per
+ * this school's own usage, not the standard 3-month calendar quarter.
  */
 export function getPeriodStarts(now = new Date()) {
   const startOfWeek = new Date(now);
@@ -11,8 +12,8 @@ export function getPeriodStarts(now = new Date()) {
 
   const startOfMonth = new Date(now.getFullYear(), now.getMonth(), 1);
 
-  const quarterMonth = Math.floor(now.getMonth() / 3) * 3;
-  const startOfQuarter = new Date(now.getFullYear(), quarterMonth, 1);
+  const termMonth = Math.floor(now.getMonth() / 4) * 4;
+  const startOfQuarter = new Date(now.getFullYear(), termMonth, 1);
 
   return { startOfWeek, startOfMonth, startOfQuarter };
 }

@@ -10,40 +10,109 @@ function authHeaders() {
 
 const DEAL_PROPERTIES = ["dealname", "dealstage", "pipeline", "createdate", "closedate", "hs_lastmodifieddate"];
 
-/**
- * Fetches deals created on or after `sinceDate`, following pagination.
- * There's no persistent server here to keep a full local copy of every deal,
- * so every request asks HubSpot only for what it actually needs (the
- * current + comparison period) instead of the whole account's history —
- * that's the difference between a ~1s response and a 20+s one.
- */
-export async function fetchRecentDeals(sinceDate) {
-  const deals = [];
-  let after = undefined;
+function sleep(ms) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
 
-  do {
+async function searchDealsPage(start, end, after) {
+  for (let attempt = 0; ; attempt++) {
     const res = await fetch(`${HUBSPOT_BASE}/crm/v3/objects/deals/search`, {
       method: "POST",
       headers: authHeaders(),
       body: JSON.stringify({
         filterGroups: [
-          { filters: [{ propertyName: "createdate", operator: "GTE", value: String(sinceDate.getTime()) }] },
+          {
+            filters: [
+              { propertyName: "createdate", operator: "GTE", value: String(start.getTime()) },
+              { propertyName: "createdate", operator: "LT", value: String(end.getTime()) },
+            ],
+          },
         ],
         properties: DEAL_PROPERTIES,
         limit: 100,
         after,
       }),
     });
+
+    if (res.status === 429 && attempt < 3) {
+      const retryAfter = Number(res.headers.get("Retry-After")) || 1;
+      await sleep(retryAfter * 1000 * (attempt + 1));
+      continue;
+    }
     if (!res.ok) {
       const body = await res.text();
       throw new Error(`HubSpot deals search failed (${res.status}): ${body}`);
     }
-    const data = await res.json();
+    return res.json();
+  }
+}
+
+async function fetchDealsInRange(start, end) {
+  const deals = [];
+  let after = undefined;
+
+  do {
+    const data = await searchDealsPage(start, end, after);
     deals.push(...data.results);
     after = data.paging?.next?.after;
   } while (after);
 
   return deals;
+}
+
+// Runs `fn` over `items` with at most `limit` in flight at once — HubSpot's
+// search endpoint enforces a low per-second rate limit, so firing every
+// month slice at the same instant gets throttled with 429s instead of
+// actually going faster.
+async function mapWithConcurrency(items, limit, fn) {
+  const results = new Array(items.length);
+  let next = 0;
+
+  async function worker() {
+    while (next < items.length) {
+      const current = next++;
+      results[current] = await fn(items[current], current);
+    }
+  }
+
+  await Promise.all(Array.from({ length: Math.min(limit, items.length) }, worker));
+  return results;
+}
+
+// Splits [sinceDate, now) into calendar-month slices so they can be fetched
+// concurrently below — each slice only ever needs a couple of pages, versus
+// one long sequential pagination loop across the whole window.
+function monthSlices(sinceDate, now) {
+  const slices = [];
+  let cursor = new Date(sinceDate.getFullYear(), sinceDate.getMonth(), 1);
+
+  while (cursor < now) {
+    const nextMonth = new Date(cursor.getFullYear(), cursor.getMonth() + 1, 1);
+    slices.push({
+      start: cursor < sinceDate ? sinceDate : cursor,
+      end: nextMonth < now ? nextMonth : now,
+    });
+    cursor = nextMonth;
+  }
+
+  return slices;
+}
+
+/**
+ * Fetches deals created on or after `sinceDate`. There's no persistent
+ * server here to keep a full local copy of every deal, so every request
+ * asks HubSpot only for what it actually needs (the current + comparison
+ * period) instead of the whole account's history. For wider windows, the
+ * range is split into monthly slices fetched a few at a time (limited
+ * concurrency, since HubSpot's search endpoint rate-limits a full burst) —
+ * a single sequential pagination loop across, say, an 8-month window took
+ * 12+ seconds in testing.
+ */
+export async function fetchRecentDeals(sinceDate) {
+  const now = new Date();
+  const slices = monthSlices(sinceDate, now);
+  const results = await mapWithConcurrency(slices, 3, ({ start, end }) => fetchDealsInRange(start, end));
+  return results.flat();
 }
 
 /**

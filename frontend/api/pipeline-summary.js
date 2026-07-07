@@ -1,6 +1,12 @@
 import { fetchRecentDeals, fetchDealPipelines, buildStageLookup } from "./_lib/hubspotClient.js";
 import { resolveDeals, aggregateDeals, getPeriodStarts } from "./_lib/aggregate.js";
 
+// Widening the "quarter" to a 4-month term (and the growing comparison
+// window as a term progresses) can mean several months of deals to
+// paginate through. Extend past Vercel's default timeout as a safety
+// margin — actual usage is dominated by the edge cache below anyway.
+export const config = { maxDuration: 30 };
+
 // GET /api/pipeline-summary — the frontend's only data call, no HubSpot token in sight.
 // Cached at Vercel's edge for 5 minutes (serving stale for up to 2 more while
 // refreshing in the background) since there's no persistent server here to
