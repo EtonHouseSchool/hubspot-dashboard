@@ -18,7 +18,38 @@ export function getPeriodStarts(now = new Date()) {
   return { startOfWeek, startOfMonth, startOfQuarter };
 }
 
-const PERIOD_KEYS = ["weekly", "monthly", "quarterly"];
+const PERIOD_KEYS = ["weekly", "monthly", "quarterly", "lastMonth"];
+
+/**
+ * Returns { start, end } for every chart period, plus a matching "previous"
+ * window for each used in trend deltas. weekly/monthly/quarterly are
+ * "so far" periods (start -> now), each compared against the immediately
+ * preceding window of equal length. lastMonth is different in kind — a
+ * complete, already-finished calendar month — so its comparison is simply
+ * the calendar month before it, not an equal-elapsed-duration window.
+ */
+export function getPeriodRanges(now = new Date()) {
+  const { startOfWeek, startOfMonth, startOfQuarter } = getPeriodStarts(now);
+
+  const lastMonthStart = new Date(startOfMonth.getFullYear(), startOfMonth.getMonth() - 1, 1);
+  const twoMonthsAgoStart = new Date(startOfMonth.getFullYear(), startOfMonth.getMonth() - 2, 1);
+
+  const soFar = (start) => ({ start, end: now });
+  const equalLengthBefore = (start) => ({ start: new Date(start.getTime() - (now.getTime() - start.getTime())), end: start });
+
+  return {
+    weekly: soFar(startOfWeek),
+    monthly: soFar(startOfMonth),
+    quarterly: soFar(startOfQuarter),
+    lastMonth: { start: lastMonthStart, end: startOfMonth },
+    previous: {
+      weekly: equalLengthBefore(startOfWeek),
+      monthly: equalLengthBefore(startOfMonth),
+      quarterly: equalLengthBefore(startOfQuarter),
+      lastMonth: { start: twoMonthsAgoStart, end: lastMonthStart },
+    },
+  };
+}
 
 /**
  * Turns raw HubSpot deal objects into the flat shape the rest of the app
@@ -78,21 +109,17 @@ function toSortedArray(counts, orders) {
 }
 
 function summarizePeriods(deals) {
-  const { startOfWeek, startOfMonth, startOfQuarter } = getPeriodStarts();
-  const now = new Date();
-  const periodStarts = { weekly: startOfWeek, monthly: startOfMonth, quarterly: startOfQuarter };
+  const ranges = getPeriodRanges();
 
   const summary = {};
   const previous = {};
 
   for (const key of PERIOD_KEYS) {
-    const start = periodStarts[key];
-    const { counts, orders } = bucketCounts(deals, start, now);
+    const { counts, orders } = bucketCounts(deals, ranges[key].start, ranges[key].end);
     summary[key] = toSortedArray(counts, orders);
 
-    const durationMs = now.getTime() - start.getTime();
-    const previousStart = new Date(start.getTime() - durationMs);
-    const { counts: prevCounts, orders: prevOrders } = bucketCounts(deals, previousStart, start);
+    const prevRange = ranges.previous[key];
+    const { counts: prevCounts, orders: prevOrders } = bucketCounts(deals, prevRange.start, prevRange.end);
     previous[key] = toSortedArray(prevCounts, prevOrders);
   }
 
@@ -103,10 +130,9 @@ function summarizePeriods(deals) {
 /**
  * Groups resolved deals by pipeline (e.g. two different campuses can each
  * have their own pipeline in the same HubSpot account) and, within each
- * pipeline, into weekly/monthly/quarterly stage buckets. Each period also
- * gets the same breakdown for the immediately preceding window of equal
- * length, so the frontend can show fair like-for-like trend deltas instead
- * of comparing a partial period to a full one.
+ * pipeline, into weekly/monthly/quarterly/lastMonth stage buckets. Each
+ * period also gets a fair comparison window for trend deltas (see
+ * getPeriodRanges).
  *
  * `knownPipelines` (from HubSpot's pipeline list, not from the deals
  * themselves) ensures a pipeline with zero matching deals in the fetched
@@ -147,9 +173,8 @@ export function aggregateDeals(resolvedDeals, knownPipelines = []) {
  * within a given period for a specific pipeline, newest first.
  */
 export function filterDeals(resolvedDeals, { stage, period, pipelineId }) {
-  const { startOfWeek, startOfMonth, startOfQuarter } = getPeriodStarts();
-  const periodStart = { weekly: startOfWeek, monthly: startOfMonth, quarterly: startOfQuarter }[period];
-  if (!periodStart) return [];
+  const range = getPeriodRanges()[period];
+  if (!range) return [];
 
   return resolvedDeals
     .filter(
@@ -157,7 +182,8 @@ export function filterDeals(resolvedDeals, { stage, period, pipelineId }) {
         deal.stage === stage &&
         deal.pipelineId === pipelineId &&
         deal.createdate &&
-        new Date(deal.createdate) >= periodStart
+        new Date(deal.createdate) >= range.start &&
+        new Date(deal.createdate) < range.end
     )
     .sort((a, b) => new Date(b.createdate) - new Date(a.createdate));
 }

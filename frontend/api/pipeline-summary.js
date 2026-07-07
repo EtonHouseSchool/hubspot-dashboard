@@ -1,5 +1,5 @@
 import { fetchRecentDeals, fetchDealPipelines, buildStageLookup } from "./_lib/hubspotClient.js";
-import { resolveDeals, aggregateDeals, getPeriodStarts } from "./_lib/aggregate.js";
+import { resolveDeals, aggregateDeals, getPeriodRanges } from "./_lib/aggregate.js";
 
 // Widening the "quarter" to a 4-month term (and the growing comparison
 // window as a term progresses) can mean several months of deals to
@@ -13,12 +13,14 @@ export const config = { maxDuration: 30 };
 // hold a warm in-memory cache the way a long-running Node process would.
 export default async function handler(req, res) {
   try {
-    const { startOfQuarter } = getPeriodStarts();
-    // Quarterly is always the widest window, so its "previous equal-length
-    // period" boundary is the earliest createdate we need for any of the
-    // three periods' trend comparisons.
-    const durationMs = Date.now() - startOfQuarter.getTime();
-    const earliestNeeded = new Date(startOfQuarter.getTime() - durationMs);
+    // The earliest createdate any period (or its trend comparison window)
+    // needs — usually quarterly's previous-equal-length window, but early
+    // in a term that can be narrower than lastMonth's comparison (two
+    // calendar months back), so take whichever start is earlier.
+    const ranges = getPeriodRanges();
+    const earliestNeeded = new Date(
+      Math.min(ranges.previous.quarterly.start.getTime(), ranges.previous.lastMonth.start.getTime())
+    );
 
     const [deals, pipelines] = await Promise.all([fetchRecentDeals(earliestNeeded), fetchDealPipelines()]);
     const stageLookup = buildStageLookup(pipelines);

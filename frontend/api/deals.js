@@ -1,7 +1,7 @@
 import { fetchRecentDeals, fetchDealPipelines, buildStageLookup } from "./_lib/hubspotClient.js";
-import { resolveDeals, filterDeals, getPeriodStarts } from "./_lib/aggregate.js";
+import { resolveDeals, filterDeals, getPeriodRanges } from "./_lib/aggregate.js";
 
-const VALID_PERIODS = ["weekly", "monthly", "quarterly"];
+const VALID_PERIODS = ["weekly", "monthly", "quarterly", "lastMonth"];
 
 // See pipeline-summary.js — the quarterly ("term") window can span several
 // months, so this gets the same safety margin.
@@ -20,10 +20,9 @@ export default async function handler(req, res) {
   }
 
   try {
-    const { startOfWeek, startOfMonth, startOfQuarter } = getPeriodStarts();
-    const periodStart = { weekly: startOfWeek, monthly: startOfMonth, quarterly: startOfQuarter }[period];
+    const range = getPeriodRanges()[period];
 
-    const [deals, pipelines] = await Promise.all([fetchRecentDeals(periodStart), fetchDealPipelines()]);
+    const [deals, pipelines] = await Promise.all([fetchRecentDeals(range.start), fetchDealPipelines()]);
     const stageLookup = buildStageLookup(pipelines);
     const resolved = resolveDeals(deals, stageLookup);
     const filtered = filterDeals(resolved, { stage, period, pipelineId: pipeline });

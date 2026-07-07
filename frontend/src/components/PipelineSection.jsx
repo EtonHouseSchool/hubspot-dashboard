@@ -61,7 +61,7 @@ export default function PipelineSection({ pipeline, onSelectStage }) {
 
   const legendStages = useMemo(() => {
     const seen = new Set();
-    for (const period of [pipeline.quarterly, pipeline.monthly, pipeline.weekly]) {
+    for (const period of [pipeline.quarterly, pipeline.monthly, pipeline.lastMonth, pipeline.weekly]) {
       for (const entry of period) seen.add(entry.stage);
     }
     return [...seen];
@@ -116,6 +116,13 @@ export default function PipelineSection({ pipeline, onSelectStage }) {
         data={pipeline.monthly}
         colorMap={stageColorMap}
         period="monthly"
+        onSelectStage={handleSelect}
+      />
+      <StageChart
+        title="Last month"
+        data={pipeline.lastMonth}
+        colorMap={stageColorMap}
+        period="lastMonth"
         onSelectStage={handleSelect}
       />
       <StageChart

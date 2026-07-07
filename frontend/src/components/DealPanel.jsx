@@ -1,6 +1,7 @@
 const PERIOD_LABELS = {
   weekly: "this week so far",
   monthly: "this month so far",
+  lastMonth: "last month",
   quarterly: "this quarter so far",
 };
 
